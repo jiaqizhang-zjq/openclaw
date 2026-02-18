@@ -110,20 +110,105 @@ Use plain human language for narration unless in a technical context.
 
 ---
 
-**⚠️ 工具系统的技术说明（不包含在 prompt 中）：**
+**⚠️ 关键问题：Prompt 里只有工具名称，那 LLM 怎么知道要传什么参数？**
 
-**关键说明：工具参数 Schema 有两种传递方式！**
+**答案：参数 Schema 不是通过 Prompt 文本传递的！**
 
-1. **Prompt 中的文本说明**（上面的代码块内容）：
-   - 给 LLM 的人类可读文档
-   - 告诉 LLM 有哪些工具可用、它们的作用
-   - 仅作参考，**不是** LLM 生成 tool_call 时的技术依据
+让我用 `subagents` 工具举个完整的例子：
 
-2. **SDK 参数传递**（真正的技术实现）：
-   - 通过 `@mariozechner/pi-agent` 和 `@mariozechner/pi-coding-agent` 库的 `tools` 参数传递
-   - 包含完整的 TypeBox JSON Schema，定义参数类型、约束等
-   - 这是 LLM 实际用来生成正确 tool_call 格式的关键！
-   - 位置：`src/agents/pi-embedded-runner/run/attempt.ts:573-584`
+### 1. 真实的系统 prompt（只有工具名称和描述）
+
+```markdown
+## Tooling
+...
+- subagents: List, steer, or kill sub-agent runs for this requester session
+...
+```
+
+### 2. 完整的工具定义（包含 parameters Schema）
+
+**位置：** `src/agents/tools/subagents-tool.ts:48-53, 389-395`
+
+```typescript
+const SubagentsToolSchema = Type.Object({
+  action: optionalStringEnum(["list", "kill", "steer"]),
+  target: Type.Optional(Type.String()),
+  message: Type.Optional(Type.String()),
+  recentMinutes: Type.Optional(Type.Number({ minimum: 1 })),
+});
+
+export function createSubagentsTool(): AnyAgentTool {
+  return {
+    label: "Subagents",
+    name: "subagents",
+    description: "List, kill, or steer spawned sub-agents...",
+    parameters: SubagentsToolSchema,  // ⬅️ 关键：完整的 JSON Schema！
+    execute: async (_toolCallId, args) => {
+      // 执行逻辑
+    },
+  };
+}
+```
+
+### 3. 传递给 SDK（真正让 LLM 知道参数的方式）
+
+**位置：** `src/agents/pi-embedded-runner/run/attempt.ts:573-584`
+
+```typescript
+({ session } = await createAgentSession({
+  // ... 其他参数
+  tools: builtInTools,        // ⬅️ 关键：包含完整的 parameters Schema！
+  customTools: allCustomTools,
+  // ...
+}));
+```
+
+### 完整流程图：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. 系统 Prompt（文本，仅作参考）                           │
+│    "You are a personal assistant..."                       │
+│    "## Tooling"                                             │
+│    "- subagents: List, steer, or kill..."                  │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 2. SDK tools 参数（真正让 LLM 知道参数的关键！）            │
+│    [                                                        │
+│      {                                                     │
+│        name: "subagents",                                 │
+│        description: "...",                                 │
+│        parameters: {                                       │
+│          type: "object",                                  │
+│          properties: {                                     │
+│            action: { type: "string", enum: [...] },     │
+│            target: { type: "string" },                   │
+│            ...                                             │
+│          }                                                 │
+│        }                                                   │
+│      }                                                     │
+│    ]                                                       │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 3. LLM 生成正确格式的 tool_call                              │
+│    {                                                       │
+│      "name": "subagents",                                 │
+│      "arguments": {                                       │
+│        "action": "list",                                  │
+│        "recentMinutes": 30                                │
+│      }                                                     │
+│    }                                                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 总结：
+
+| 传递方式             | 内容                       | 用途                                |
+| -------------------- | -------------------------- | ----------------------------------- |
+| **Prompt 文本**      | 工具名称 + 简要描述        | 给 LLM 的人类可读参考               |
+| **SDK `tools` 参数** | 完整的 TypeBox JSON Schema | **真正让 LLM 知道参数格式的关键！** |
 
 ---
 
