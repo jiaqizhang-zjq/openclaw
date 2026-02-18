@@ -56,6 +56,21 @@ buildAgentSystemPrompt()
 
 #### 1. 身份和工具说明
 
+**⚠️ 关键说明：工具参数 Schema 有两种传递方式！**
+
+1. **Prompt 中的文本说明**（本部分内容）：
+   - 给 LLM 的人类可读文档
+   - 告诉 LLM 有哪些工具可用、它们的作用
+   - 仅作参考，**不是** LLM 生成 tool_call 时的技术依据
+
+2. **SDK 参数传递**（真正的技术实现）：
+   - 通过 `@mariozechner/pi-agent` 和 `@mariozechner/pi-coding-agent` 库的 `tools` 参数传递
+   - 包含完整的 TypeBox JSON Schema，定义参数类型、约束等
+   - 这是 LLM 实际用来生成正确 tool_call 格式的关键！
+   - 位置：`src/agents/pi-embedded-runner/run/attempt.ts:573-584`
+
+---
+
 ```markdown
 You are a personal assistant running inside OpenClaw.
 
@@ -160,6 +175,44 @@ If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) an
 ```
 
 #### 4. 技能部分 (Skills)
+
+**⚠️ 完整的 Skill 系统说明：**
+
+Skill 是指导性文档，用于指导 LLM 如何完成特定任务。
+
+### Skill 的加载优先级（从低到高）
+1. **额外技能** (extra dirs) - 配置文件中指定的额外目录
+2. **捆绑技能** (bundled skills) - OpenClaw 内置的技能
+3. **管理技能** (managed skills) - `~/.config/openclaw/skills/`
+4. **个人代理技能** (~/.agents/skills/) - 用户个人技能
+5. **项目代理技能** (workspace/.agents/skills/) - 项目特定技能
+6. **工作区技能** (workspace/skills/) ← 最高优先级 - 当前工作区技能
+
+### Skill 的 Frontmatter 配置
+Skill 支持 YAML Frontmatter，可以配置：
+- `command-dispatch` / `command_dispatch`: 命令分发方式（仅支持 "tool"）
+- `command-tool` / `command_tool`: 命令对应的工具名称
+- `command-arg-mode` / `command_arg_mode`: 参数模式（仅支持 "raw"）
+- `disableModelInvocation`: 禁用模型调用
+- `userInvocable`: 是否允许用户通过 /skill 命令调用
+
+### Skill 的限制配置
+- `maxCandidatesPerRoot`: 每个根目录的最大候选数（默认 300）
+- `maxSkillsLoadedPerSource`: 每个来源的最大加载技能数（默认 200）
+- `maxSkillsInPrompt`: Prompt 中包含的最大技能数（默认 150）
+- `maxSkillsPromptChars`: Prompt 中技能部分的最大字符数（默认 30,000）
+- `maxSkillFileBytes`: 单个 SKILL.md 文件的最大字节数（默认 256,000）
+
+### Skill 的扫描目录
+系统会从以下位置扫描技能：
+- `workspace/skills/` - 工作区技能
+- `workspace/.agents/skills/` - 项目代理技能
+- `~/.agents/skills/` - 个人代理技能
+- `~/.config/openclaw/skills/` - 管理技能
+- 捆绑技能目录（OpenClaw 内置）
+- 配置文件中指定的额外目录
+
+---
 
 ```markdown
 ## Skills (mandatory)
