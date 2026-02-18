@@ -1,3 +1,7 @@
+/**
+ * 工具系统模块
+ * 负责创建和管理OpenClaw的工具系统
+ */
 import {
   codingTools,
   createEditTool,
@@ -160,6 +164,41 @@ export const __testing = {
   assertRequiredParams,
 } as const;
 
+/**
+ * 创建OpenClaw编码工具集合
+ * @param options 配置选项
+ * @param options.exec 执行工具默认配置
+ * @param options.messageProvider 消息提供者
+ * @param options.agentAccountId 代理账户ID
+ * @param options.messageTo 消息目标
+ * @param options.messageThreadId 消息线程ID
+ * @param options.sandbox 沙箱上下文
+ * @param options.sessionKey 会话密钥
+ * @param options.agentDir 代理目录
+ * @param options.workspaceDir 工作区目录
+ * @param options.config 配置对象
+ * @param options.abortSignal 中止信号
+ * @param options.modelProvider 模型提供者
+ * @param options.modelId 模型ID
+ * @param options.modelAuthMode 模型认证模式
+ * @param options.currentChannelId 当前通道ID
+ * @param options.currentThreadTs 当前线程时间戳
+ * @param options.groupId 群组ID
+ * @param options.groupChannel 群组通道
+ * @param options.groupSpace 群组空间
+ * @param options.spawnedBy 父会话密钥
+ * @param options.senderId 发送者ID
+ * @param options.senderName 发送者名称
+ * @param options.senderUsername 发送者用户名
+ * @param options.senderE164 发送者E164格式号码
+ * @param options.replyToMode 回复模式
+ * @param options.hasRepliedRef 回复跟踪引用
+ * @param options.modelHasVision 模型是否有视觉能力
+ * @param options.requireExplicitMessageTarget 是否需要显式消息目标
+ * @param options.disableMessageTool 是否禁用消息工具
+ * @param options.senderIsOwner 发送者是否为所有者
+ * @returns 工具数组
+ */
 export function createOpenClawCodingTools(options?: {
   exec?: ExecToolDefaults & ProcessToolDefaults;
   messageProvider?: string;

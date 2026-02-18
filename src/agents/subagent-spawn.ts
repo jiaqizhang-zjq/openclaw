@@ -1,3 +1,7 @@
+/**
+ * 子代理生成模块
+ * 负责生成和管理子代理会话
+ */
 import crypto from "node:crypto";
 import { formatThinkingLevels, normalizeThinkLevel } from "../auto-reply/thinking.js";
 import { loadConfig } from "../config/config.js";
@@ -17,37 +21,73 @@ import {
   resolveMainSessionAlias,
 } from "./tools/sessions-helpers.js";
 
+/**
+ * 生成子代理的参数
+ */
 export type SpawnSubagentParams = {
+  /** 子代理要执行的任务 */
   task: string;
+  /** 子代理的标签 */
   label?: string;
+  /** 代理ID */
   agentId?: string;
+  /** 模型覆盖 */
   model?: string;
+  /** 思考级别 */
   thinking?: string;
+  /** 运行超时时间（秒） */
   runTimeoutSeconds?: number;
+  /** 清理策略 */
   cleanup?: "delete" | "keep";
 };
 
+/**
+ * 生成子代理的上下文
+ */
 export type SpawnSubagentContext = {
+  /** 代理会话密钥 */
   agentSessionKey?: string;
+  /** 代理通道 */
   agentChannel?: string;
+  /** 代理账户ID */
   agentAccountId?: string;
+  /** 代理目标 */
   agentTo?: string;
+  /** 代理线程ID */
   agentThreadId?: string | number;
+  /** 代理群组ID */
   agentGroupId?: string | null;
+  /** 代理群组通道 */
   agentGroupChannel?: string | null;
+  /** 代理群组空间 */
   agentGroupSpace?: string | null;
+  /** 请求者代理ID覆盖 */
   requesterAgentIdOverride?: string;
 };
 
+/**
+ * 生成子代理的结果
+ */
 export type SpawnSubagentResult = {
+  /** 状态：accepted（接受）| forbidden（禁止）| error（错误） */
   status: "accepted" | "forbidden" | "error";
+  /** 子会话密钥 */
   childSessionKey?: string;
+  /** 运行ID */
   runId?: string;
+  /** 模型是否应用 */
   modelApplied?: boolean;
+  /** 警告信息 */
   warning?: string;
+  /** 错误信息 */
   error?: string;
 };
 
+/**
+ * 分割模型引用
+ * @param ref 模型引用
+ * @returns 分割后的提供者和模型
+ */
 export function splitModelRef(ref?: string) {
   if (!ref) {
     return { provider: undefined, model: undefined };
@@ -63,6 +103,11 @@ export function splitModelRef(ref?: string) {
   return { provider: undefined, model: trimmed };
 }
 
+/**
+ * 标准化模型选择
+ * @param value 模型选择值
+ * @returns 标准化后的模型选择
+ */
 export function normalizeModelSelection(value: unknown): string | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -75,9 +120,14 @@ export function normalizeModelSelection(value: unknown): string | undefined {
   if (typeof primary === "string" && primary.trim()) {
     return primary.trim();
   }
-  return undefined;
-}
 
+
+/**
+ * 直接生成子代理
+ * @param params 生成参数
+ * @param ctx 生成上下文
+ * @returns 生成结果
+ */
 export async function spawnSubagentDirect(
   params: SpawnSubagentParams,
   ctx: SpawnSubagentContext,

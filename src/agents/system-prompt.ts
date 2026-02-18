@@ -1,3 +1,7 @@
+/**
+ * 系统提示构建模块
+ * 负责生成OpenClaw代理的系统提示，包含工具、工作区、运行时等信息
+ */
 import type { ReasoningLevel, ThinkLevel } from "../auto-reply/thinking.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
@@ -7,13 +11,21 @@ import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
 import { sanitizeForPromptLiteral } from "./sanitize-for-prompt.js";
 
 /**
- * Controls which hardcoded sections are included in the system prompt.
- * - "full": All sections (default, for main agent)
- * - "minimal": Reduced sections (Tooling, Workspace, Runtime) - used for subagents
- * - "none": Just basic identity line, no sections
+ * 控制系统提示中包含哪些硬编码部分
+ * - "full": 所有部分（默认，用于主代理）
+ * - "minimal": 简化部分（工具、工作区、运行时）- 用于子代理
+ * - "none": 仅基本身份行，无其他部分
  */
 export type PromptMode = "full" | "minimal" | "none";
 
+/**
+ * 构建技能部分的系统提示
+ * @param params 构建参数
+ * @param params.skillsPrompt 技能提示内容
+ * @param params.isMinimal 是否为简化模式
+ * @param params.readToolName 读取工具名称
+ * @returns 技能部分的提示行数组
+ */
 function buildSkillsSection(params: {
   skillsPrompt?: string;
   isMinimal: boolean;
@@ -34,6 +46,220 @@ function buildSkillsSection(params: {
     "- If none clearly apply: do not read any SKILL.md.",
     "Constraints: never read more than one skill up front; only read after selecting.",
     trimmed,
+    "",
+  ];
+}
+
+/**
+ * 构建记忆部分的系统提示
+ * @param params 构建参数
+ * @param params.isMinimal 是否为简化模式
+ * @param params.availableTools 可用工具集合
+ * @param params.citationsMode 引用模式
+ * @returns 记忆部分的提示行数组
+ */
+function buildMemorySection(params: {
+  isMinimal: boolean;
+  availableTools: Set<string>;
+  citationsMode?: MemoryCitationsMode;
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  if (!params.availableTools.has("memory_search") && !params.availableTools.has("memory_get")) {
+    return [];
+  }
+  const lines = [
+    "## Memory Recall",
+    "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
+  ];
+  if (params.citationsMode === "off") {
+    lines.push(
+      "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks.",
+    );
+  } else {
+    lines.push(
+      "Citations: include Source: <path#line> when it helps the user verify memory snippets.",
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
+/**
+ * 构建用户身份部分的系统提示
+ * @param ownerLine 所有者信息行
+ * @param isMinimal 是否为简化模式
+ * @returns 用户身份部分的提示行数组
+ */
+function buildUserIdentitySection(ownerLine: string | undefined, isMinimal: boolean) {
+  if (!ownerLine || isMinimal) {
+    return [];
+  }
+  return ["## User Identity", ownerLine, ""];
+}
+
+/**
+ * 构建时间部分的系统提示
+ * @param params 构建参数
+ * @param params.userTimezone 用户时区
+ * @returns 时间部分的提示行数组
+ */
+function buildTimeSection(params: {
+  userTimezone?: string;
+}) {
+  if (!params.userTimezone) {
+    return [];
+  }
+  return ["## Current Date & Time", `Time zone: ${params.userTimezone}`, ""];
+}
+
+/**
+ * 构建回复标签部分的系统提示
+ * @param isMinimal 是否为简化模式
+ * @returns 回复标签部分的提示行数组
+ */
+function buildReplyTagsSection(isMinimal: boolean) {
+  if (isMinimal) {
+    return [];
+  }
+  return [
+    "## Reply Tags",
+    "To request a native reply/quote on supported surfaces, include one tag in your reply:",
+    "- [[reply_to_current]] replies to the triggering message.",
+    "- Prefer [[reply_to_current]]. Use [[reply_to:<id>]] only when an id was explicitly provided (e.g. by the user or a tool).",
+    "Whitespace inside the tag is allowed (e.g. [[ reply_to_current ]] / [[ reply_to: 123 ]]).",
+    "Tags are stripped before sending; support depends on the current channel config.",
+    "",
+  ];
+}
+
+/**
+ * 构建消息部分的系统提示
+ * @param params 构建参数
+ * @param params.isMinimal 是否为简化模式
+ * @param params.availableTools 可用工具集合
+ * @param params.messageChannelOptions 消息通道选项
+ * @param params.inlineButtonsEnabled 是否启用内联按钮
+ * @param params.runtimeChannel 运行时通道
+ * @param params.messageToolHints 消息工具提示
+ * @returns 消息部分的提示行数组
+ */
+function buildMessagingSection(params: {
+  isMinimal: boolean;
+  availableTools: Set<string>;
+  messageChannelOptions: string;
+  inlineButtonsEnabled: boolean;
+  runtimeChannel?: string;
+  messageToolHints?: string[];
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  return [
+    "## Messaging",
+    "- Reply in current session → automatically routes to the source channel (Signal, Telegram, etc.)",
+    "- Cross-session messaging → use sessions_send(sessionKey, message)",
+    "- Sub-agent orchestration → use subagents(action=list|steer|kill)",
+    "- `[System Message] ...` blocks are internal context and are not user-visible by default.",
+    `- If a \`[System Message]\` reports completed cron/subagent work and asks for a user update, rewrite it in your normal assistant voice and send that update (do not forward raw system text or default to ${SILENT_REPLY_TOKEN}).`,
+    "- Never use exec/curl for provider messaging; OpenClaw handles all routing internally.",
+    params.availableTools.has("message")
+      ? [
+          "",
+          "### message tool",
+          "- Use `message` for proactive sends + channel actions (polls, reactions, etc.).",
+          "- For `action=send`, include `to` and `message`.",
+          `- If multiple channels are configured, pass \`channel\` (${params.messageChannelOptions}).`,
+          `- If you use \`message\` (\`action=send\`) to deliver your user-visible reply, respond with ONLY: ${SILENT_REPLY_TOKEN} (avoid duplicate replies).`,
+          params.inlineButtonsEnabled
+            ? "- Inline buttons supported. Use `action=send` with `buttons=[[{text,callback_data,style?}]]`; `style` can be `primary`, `success`, or `danger`."
+            : params.runtimeChannel
+              ? `- Inline buttons not enabled for ${params.runtimeChannel}. If you need them, ask to set ${params.runtimeChannel}.capabilities.inlineButtons ("dm"|"group"|"all"|"allowlist").`
+              : "",
+          ...(params.messageToolHints ?? []),
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : "",
+    "",
+  ];
+}
+
+/**
+ * 构建语音部分的系统提示
+ * @param params 构建参数
+ * @param params.isMinimal 是否为简化模式
+ * @param params.ttsHint TTS提示
+ * @returns 语音部分的提示行数组
+ */
+function buildVoiceSection(params: {
+  isMinimal: boolean;
+  ttsHint?: string;
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  const hint = params.ttsHint?.trim();
+  if (!hint) {
+    return [];
+  }
+  return ["## Voice (TTS)", hint, ""];
+}
+
+/**
+ * 构建llms.txt发现部分的系统提示
+ * @param params 构建参数
+ * @param params.isMinimal 是否为简化模式
+ * @param params.availableTools 可用工具集合
+ * @returns llms.txt发现部分的提示行数组
+ */
+function buildLlmsTxtSection(params: {
+  isMinimal: boolean;
+  availableTools: Set<string>;
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  if (!params.availableTools.has("web_fetch")) {
+    return [];
+  }
+  return [
+    "## llms.txt Discovery",
+    "When exploring a new domain or website (via web_fetch or browser), check for an llms.txt file that describes how AI agents should interact with the site:",
+    "- Try `/llms.txt` or `/.well-known/llms.txt` at the domain root",
+    "- If found, follow its guidance for interacting with that site's content and APIs",
+    "- llms.txt is an emerging standard (like robots.txt for AI) — not all sites have one, so don't warn if missing",
+    "",
+  ];
+}
+
+/**
+ * 构建文档部分的系统提示
+ * @param params 构建参数
+ * @param params.docsPath 文档路径
+ * @param params.isMinimal 是否为简化模式
+ * @param params.readToolName 读取工具名称
+ * @returns 文档部分的提示行数组
+ */
+function buildDocsSection(params: {
+  docsPath?: string;
+  isMinimal: boolean;
+  readToolName: string;
+}) {
+  const docsPath = params.docsPath?.trim();
+  if (!docsPath || params.isMinimal) {
+    return [];
+  }
+  return [
+    "## Documentation",
+    `OpenClaw docs: ${docsPath}`,
+    "Mirror: https://docs.openclaw.ai",
+    "Source: https://github.com/openclaw/openclaw",
+    "Community: https://discord.com/invite/clawd",
+    "Find new skills: https://clawhub.com",
+    "For OpenClaw behavior, commands, config, or architecture: consult local docs first.",
+    "When diagnosing issues, run `openclaw status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
     "",
   ];
 }
@@ -182,6 +408,35 @@ function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readT
   ];
 }
 
+/**
+ * 构建代理系统提示
+ * @param params 构建参数
+ * @param params.workspaceDir 工作目录
+ * @param params.defaultThinkLevel 默认思考级别
+ * @param params.reasoningLevel 推理级别
+ * @param params.extraSystemPrompt 额外的系统提示
+ * @param params.ownerNumbers 所有者号码列表
+ * @param params.reasoningTagHint 是否显示推理标签提示
+ * @param params.toolNames 工具名称列表
+ * @param params.toolSummaries 工具摘要记录
+ * @param params.modelAliasLines 模型别名行
+ * @param params.userTimezone 用户时区
+ * @param params.userTime 用户时间
+ * @param params.userTimeFormat 用户时间格式
+ * @param params.contextFiles 上下文文件
+ * @param params.skillsPrompt 技能提示
+ * @param params.heartbeatPrompt 心跳提示
+ * @param params.docsPath 文档路径
+ * @param params.workspaceNotes 工作区笔记
+ * @param params.ttsHint TTS提示
+ * @param params.promptMode 提示模式
+ * @param params.runtimeInfo 运行时信息
+ * @param params.messageToolHints 消息工具提示
+ * @param params.sandboxInfo 沙箱信息
+ * @param params.reactionGuidance 反应指导
+ * @param params.memoryCitationsMode 记忆引用模式
+ * @returns 构建好的系统提示字符串
+ */
 export function buildAgentSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
@@ -655,6 +910,23 @@ export function buildAgentSystemPrompt(params: {
   return lines.filter(Boolean).join("\n");
 }
 
+/**
+ * 构建运行时信息行
+ * @param runtimeInfo 运行时信息
+ * @param runtimeInfo.agentId 代理ID
+ * @param runtimeInfo.host 主机名
+ * @param runtimeInfo.os 操作系统
+ * @param runtimeInfo.arch 架构
+ * @param runtimeInfo.node Node.js版本
+ * @param runtimeInfo.model 当前模型
+ * @param runtimeInfo.defaultModel 默认模型
+ * @param runtimeInfo.shell  shell类型
+ * @param runtimeInfo.repoRoot 仓库根目录
+ * @param runtimeChannel 运行时通道
+ * @param runtimeCapabilities 运行时能力
+ * @param defaultThinkLevel 默认思考级别
+ * @returns 运行时信息行字符串
+ */
 export function buildRuntimeLine(
   runtimeInfo?: {
     agentId?: string;
