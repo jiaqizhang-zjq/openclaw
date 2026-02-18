@@ -691,6 +691,196 @@ Runtime: agent=main | os=macos | model=gpt-4 | thinking=off
 
 ---
 
+## 5. Tool Call 消息格式和工具参数 Schema
+
+### 工具的完整结构
+
+每个 OpenClaw 工具都有以下结构：
+
+```typescript
+{
+  name: "subagents",                    // 工具名称（小写）
+  label: "Subagents",                   // 显示标签
+  description: "List, kill, or steer...", // 工具描述
+  parameters: Schema,                   // 参数 Schema（TypeBox）
+  execute: async (toolCallId, args) => { // 执行函数
+    // 工具逻辑
+  }
+}
+```
+
+### 工具参数 Schema 定义
+
+使用 **TypeBox** 库定义 JSON Schema：
+
+```typescript
+import { Type } from "@sinclair/typebox";
+
+const SubagentsToolSchema = Type.Object({
+  action: optionalStringEnum(["list", "kill", "steer"]),
+  target: Type.Optional(Type.String()),
+  message: Type.Optional(Type.String()),
+  recentMinutes: Type.Optional(Type.Number({ minimum: 1 })),
+});
+```
+
+### 常用的 TypeBox 类型
+
+| 类型         | 示例                                        |
+| ------------ | ------------------------------------------- |
+| 字符串       | `Type.String()`                             |
+| 数字         | `Type.Number()`                             |
+| 布尔值       | `Type.Boolean()`                            |
+| 可选参数     | `Type.Optional(Type.String())`              |
+| 枚举         | `optionalStringEnum(["a", "b", "c"])`       |
+| 带约束的数字 | `Type.Number({ minimum: 1, maximum: 100 })` |
+| 对象         | `Type.Object({ key: Type.String() })`       |
+
+### Tool Call 的消息格式
+
+**模型调用工具时使用的格式：**
+
+```json
+{
+  "name": "subagents",
+  "arguments": {
+    "action": "list",
+    "recentMinutes": 30
+  }
+}
+```
+
+**另一个例子（sessions_spawn）：**
+
+```json
+{
+  "name": "sessions_spawn",
+  "arguments": {
+    "task": "分析这个代码库，找出所有 TODO",
+    "label": "code-analysis",
+    "model": "gpt-4",
+    "thinking": "on"
+  }
+}
+```
+
+**read 工具的例子：**
+
+```json
+{
+  "name": "read",
+  "arguments": {
+    "path": "README.md"
+  }
+}
+```
+
+### 工具执行的完整流程
+
+```
+1. 模型生成 tool_call 消息
+   ↓
+2. 系统提取 tool_name 和 arguments
+   ↓
+3. 参数 Schema 验证和规范化 (normalizeToolParameters)
+   ↓
+4. 工具策略管道检查 (applyToolPolicyPipeline)
+   ↓
+5. 执行前钩子 (before tool call)
+   ↓
+6. 执行工具的 execute() 函数
+   ↓
+7. 返回结果给模型
+```
+
+### 工具 Schema 的规范化
+
+不同模型提供商需要不同的 Schema 格式：
+
+| 提供商        | Schema 要求                      |
+| ------------- | -------------------------------- |
+| **OpenAI**    | 顶级必须是 `type: "object"`      |
+| **Anthropic** | 完整的 JSON Schema Draft 2020-12 |
+| **Gemini**    | 需要移除某些约束关键字           |
+
+规范化位置：`src/agents/pi-tools.schema.ts:65-194`
+
+---
+
+## 6. MCP 的集成方式
+
+### MCP 在 OpenClaw 中的位置
+
+**重要：MCP 不是通过 tools 系统的！**
+
+MCP 是通过 **ACP (Agent Client Protocol)** 协议层提供的：
+
+```
+┌─────────────────────────────────────────┐
+│         OpenClaw 核心系统              │
+│  ┌─────────────────────────────────┐  │
+│  │ Tools/Skills 系统 (src/agents/) │  │
+│  └─────────────────────────────────┘  │
+│              ↑                        │
+│              │ Gateway                │
+│              ↓                        │
+│  ┌─────────────────────────────────┐  │
+│  │ ACP 协议层 (src/acp/)          │  │
+│  │  - server.ts                    │  │
+│  │  - client.ts                    │  │
+│  │  - translator.ts                │  │
+│  └─────────────────────────────────┘  │
+│              ↑                        │
+│              │ @agentclientprotocol/sdk│
+│              ↓                        │
+│         外部 IDE/工具                 │
+└─────────────────────────────────────────┘
+```
+
+### ACP 中的 MCP 能力配置
+
+在 `src/acp/translator.ts:110-113` 中：
+
+```typescript
+mcpCapabilities: {
+  http: false,    // HTTP 传输方式
+  sse: false,     // SSE 传输方式
+}
+```
+
+### 当前 MCP 状态
+
+**MCP 服务器配置目前被忽略：**
+
+```typescript
+// src/acp/translator.ts:124-126
+if (params.mcpServers.length > 0) {
+  this.log(`ignoring ${params.mcpServers.length} MCP servers`);
+}
+
+// src/acp/client.ts:372
+mcpServers: [],  // 空数组
+```
+
+### MCP 如何拼接到 Prompt？
+
+**答案：MCP 不拼接到 Prompt 中！**
+
+- **Tools/Skills** → 在 Prompt 的 `## Tooling` 部分列出
+- **MCP** → 通过 ACP SDK 提供，是独立的协议层，不在 Prompt 中
+
+### 总结对比
+
+| 特性            | Tools/Skills            | MCP                  |
+| --------------- | ----------------------- | -------------------- |
+| **位置**        | `src/agents/`           | `src/acp/`           |
+| **Prompt 中**   | ✅ 有（## Tooling 部分） | ❌ 无                 |
+| **参数 Schema** | ✅ TypeBox 定义          | N/A                  |
+| **调用方式**    | 模型直接调用            | 通过 ACP SDK         |
+| **当前状态**    | 完全实现                | MCP 服务器配置被忽略 |
+
+---
+
 ## 关键文件索引
 
 | 功能         | 文件路径                                 |
