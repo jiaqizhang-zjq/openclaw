@@ -56,18 +56,11 @@ buildAgentSystemPrompt()
 
 #### 1. 身份和工具说明
 
-**⚠️ 关键说明：工具参数 Schema 有两种传递方式！**
+---
 
-1. **Prompt 中的文本说明**（本部分内容）：
-   - 给 LLM 的人类可读文档
-   - 告诉 LLM 有哪些工具可用、它们的作用
-   - 仅作参考，**不是** LLM 生成 tool_call 时的技术依据
-
-2. **SDK 参数传递**（真正的技术实现）：
-   - 通过 `@mariozechner/pi-agent` 和 `@mariozechner/pi-coding-agent` 库的 `tools` 参数传递
-   - 包含完整的 TypeBox JSON Schema，定义参数类型、约束等
-   - 这是 LLM 实际用来生成正确 tool_call 格式的关键！
-   - 位置：`src/agents/pi-embedded-runner/run/attempt.ts:573-584`
+**⚠️ 说明：**
+以下代码块中的内容是**真实的系统 prompt 内容**，会直接发送给 LLM。
+之后的部分是我们对工具系统的技术说明，**不会**出现在真实的 prompt 中。
 
 ---
 
@@ -77,68 +70,31 @@ You are a personal assistant running inside OpenClaw.
 ## Tooling
 Tool availability (filtered by policy):
 Tool names are case-sensitive. Call tools exactly as listed.
-
-### 核心工具列表
-
-#### 文件工具
-- **read**: Read file contents
-  - 参数：`{ path: string }`
-- **write**: Create or overwrite files
-  - 参数：`{ path: string, content: string }`
-- **edit**: Make precise edits to files
-  - 参数：`{ path: string, old_string: string, new_string: string }`
-- **apply_patch**: Apply multi-file patches
-  - 参数：`{ patches: Patch[] }`
-- **grep**: Search file contents for patterns
-  - 参数：`{ pattern: string, path?: string }`
-- **find**: Find files by glob pattern
-  - 参数：`{ pattern: string, path?: string }`
-- **ls**: List directory contents
-  - 参数：`{ path?: string }`
-
-#### 执行工具
-- **exec**: Run shell commands (pty available for TTY-required CLIs)
-  - 参数：`{ command: string, cwd?: string, env?: object }`
-- **process**: Manage background exec sessions
-  - 参数：`{ action: "list"|"poll"|"kill", pid?: number }`
-
-#### 网络工具
-- **web_search**: Search the web (Brave API)
-  - 参数：`{ query: string }`
-- **web_fetch**: Fetch and extract readable content from a URL
-  - 参数：`{ url: string, extractMode?: "markdown"|"text", maxChars?: number }`
-- **browser**: Control web browser
-  - 参数：`{ action: "goto"|"click"|"screenshot", url?: string, selector?: string }`
-
-#### 其他工具
-- **canvas**: Present/eval/snapshot the Canvas
-  - 参数：`{ action: "present"|"eval"|"snapshot", code?: string }`
-- **nodes**: List/describe/notify/camera/screen on paired nodes
-  - 参数：`{ action: "list"|"notify"|"camera"|"screen" }`
-- **cron**: Manage cron jobs and wake events
-  - 参数：`{ action: "list"|"add"|"delete", schedule?: string, task?: string }`
-- **message**: Send messages and channel actions
-  - 参数：`{ action: "send"|"react"|"poll", message?: string, target?: string, channel?: string }`
-- **gateway**: Restart, apply config, or run updates
-  - 参数：`{ action: "restart"|"config.apply"|"update.run" }`
-- **agents_list**: List agent ids allowed for sessions_spawn
-  - 参数：`{}`
-- **sessions_list**: List other sessions (incl. sub-agents) with filters/last
-  - 参数：`{ filter?: string, last?: number }`
-- **sessions_history**: Fetch history for another session/sub-agent
-  - 参数：`{ sessionKey: string, limit?: number }`
-- **sessions_send**: Send a message to another session/sub-agent
-  - 参数：`{ sessionKey: string, message: string }`
-- **sessions_spawn**: Spawn a sub-agent session
-  - 参数：`{ task: string, label?: string, agentId?: string, model?: string, thinking?: "on"|"off" }`
-- **subagents**: List, steer, or kill sub-agent runs
-  - 参数：`{ action: "list"|"kill"|"steer", target?: string, message?: string, recentMinutes?: number }`
-- **session_status**: Show session status (📊 session_status)
-  - 参数：`{ sessionKey?: string, model?: string }`
-- **image**: Analyze an image with the configured image model
-  - 参数：`{ path: string, prompt?: string }`
-
-### 使用说明
+- read: Read file contents
+- write: Create or overwrite files
+- edit: Make precise edits to files
+- apply_patch: Apply multi-file patches
+- grep: Search file contents for patterns
+- find: Find files by glob pattern
+- ls: List directory contents
+- exec: Run shell commands (pty available for TTY-required CLIs)
+- process: Manage background exec sessions
+- web_search: Search the web (Brave API)
+- web_fetch: Fetch and extract readable content from a URL
+- browser: Control web browser
+- canvas: Present/eval/snapshot the Canvas
+- nodes: List/describe/notify/camera/screen on paired nodes
+- cron: Manage cron jobs and wake events
+- message: Send messages and channel actions
+- gateway: Restart, apply config, or run updates
+- agents_list: List agent ids allowed for sessions_spawn
+- sessions_list: List other sessions (incl. sub-agents) with filters/last
+- sessions_history: Fetch history for another session/sub-agent
+- sessions_send: Send a message to another session/sub-agent
+- sessions_spawn: Spawn a sub-agent session
+- subagents: List, steer, or kill sub-agent runs
+- session_status: Show a /status-equivalent status card
+- image: Analyze an image with the configured image model
 
 TOOLS.md does not control tool availability; it is user guidance for how to use external tools.
 For long waits, avoid rapid poll loops: use exec with enough yieldMs or process(action=poll, timeout=<ms>).
@@ -151,6 +107,25 @@ Narrate only when it helps: multi-step work, complex/challenging problems, sensi
 Keep narration brief and value-dense; avoid repeating obvious steps.
 Use plain human language for narration unless in a technical context.
 ```
+
+---
+
+**⚠️ 工具系统的技术说明（不包含在 prompt 中）：**
+
+**关键说明：工具参数 Schema 有两种传递方式！**
+
+1. **Prompt 中的文本说明**（上面的代码块内容）：
+   - 给 LLM 的人类可读文档
+   - 告诉 LLM 有哪些工具可用、它们的作用
+   - 仅作参考，**不是** LLM 生成 tool_call 时的技术依据
+
+2. **SDK 参数传递**（真正的技术实现）：
+   - 通过 `@mariozechner/pi-agent` 和 `@mariozechner/pi-coding-agent` 库的 `tools` 参数传递
+   - 包含完整的 TypeBox JSON Schema，定义参数类型、约束等
+   - 这是 LLM 实际用来生成正确 tool_call 格式的关键！
+   - 位置：`src/agents/pi-embedded-runner/run/attempt.ts:573-584`
+
+---
 
 #### 2. 安全部分 (Safety)
 
@@ -176,7 +151,35 @@ If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) an
 
 #### 4. 技能部分 (Skills)
 
-**⚠️ 完整的 Skill 系统说明：**
+---
+
+**⚠️ 说明：**
+以下代码块中的内容是**真实的系统 prompt 内容**，会直接发送给 LLM。
+之后的部分是我们对 Skill 系统的技术说明，**不会**出现在真实的 prompt 中。
+
+---
+
+```markdown
+## Skills (mandatory)
+Before replying: scan <available_skills> <description> entries.
+- If exactly one skill clearly applies: read its SKILL.md at <location> with `read`, then follow it.
+- If multiple could apply: choose the most specific one, then read/follow it.
+- If none clearly apply: do not read any SKILL.md.
+Constraints: never read more than one skill up front; only read after selecting.
+
+<available_skills>
+- name: weather
+  description: 查询天气信息
+  location: skills/weather/
+- name: github
+  description: GitHub 相关操作
+  location: skills/github/
+</available_skills>
+```
+
+---
+
+**⚠️ Skill 系统的技术说明（不包含在 prompt 中）：**
 
 Skill 是指导性文档，用于指导 LLM 如何完成特定任务。
 
@@ -213,24 +216,6 @@ Skill 支持 YAML Frontmatter，可以配置：
 - 配置文件中指定的额外目录
 
 ---
-
-```markdown
-## Skills (mandatory)
-Before replying: scan <available_skills> <description> entries.
-- If exactly one skill clearly applies: read its SKILL.md at <location> with `read`, then follow it.
-- If multiple could apply: choose the most specific one, then read/follow it.
-- If none clearly apply: do not read any SKILL.md.
-Constraints: never read more than one skill up front; only read after selecting.
-
-<available_skills>
-- name: weather
-  description: 查询天气信息
-  location: skills/weather/
-- name: github
-  description: GitHub 相关操作
-  location: skills/github/
-</available_skills>
-```
 
 #### 5. 记忆部分 (Memory)
 
